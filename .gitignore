@@ -150,6 +150,7 @@ ex_design/
 .expo/
 .expo-shared/
 web-build/
+app/dist/
 *.jks
 *.p8
 *.p12
