@@ -1,9 +1,9 @@
-// Mock API surface — local stand-ins for native ASR, on-device compose, and
-// NAS upload. Real implementations will replace these one-by-one without
-// touching the call sites in `screens/`.
+// Mock implementation of ApiClient — keeps a fast, deterministic path so the
+// UI can be exercised without any device permissions, network, or backend.
 
-import type { CoverTone, DraftPayload, Piece, PieceKind, TargetId } from '../types';
+import type { CoverTone, DraftPayload, Piece, TargetId } from '../types';
 import { TRANSCRIPT_CHUNKS } from '../state/samples';
+import type { ApiClient, CapturePayload, ProgressEvent, TranscribeHandle } from './types';
 
 const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 
@@ -18,29 +18,20 @@ const fmtDuration = (totalSec: number) => {
 
 const TONES: CoverTone[] = ['warm', 'cool', 'mint'];
 
-export interface TranscribeHandle {
-  /** Cancel transcription; returns the last partial transcript so the caller can decide. */
-  cancel: () => string;
-  /** Stop transcription naturally and return the final text. */
-  finish: () => Promise<string>;
-}
+let _idSeq = 1000;
+const nextId = () => `m${_idSeq++}`;
 
-/**
- * Mock streaming ASR. `onChunk` fires every ~380ms with progressive text,
- * matching the design's `ex-transcript` animation timing.
- */
 export function mockTranscribe(onChunk: (text: string) => void): TranscribeHandle {
   let i = 0;
   let last = '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const tick = () => {
     last = TRANSCRIPT_CHUNKS[Math.min(i, TRANSCRIPT_CHUNKS.length - 1)];
     onChunk(last);
     i += 1;
-    if (i < TRANSCRIPT_CHUNKS.length * 2) {
-      timer = setTimeout(tick, 380);
-    }
+    if (i < TRANSCRIPT_CHUNKS.length * 2) timer = setTimeout(tick, 380);
   };
-  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(tick, 50);
+  timer = setTimeout(tick, 50);
   return {
     cancel: () => {
       if (timer) clearTimeout(timer);
@@ -53,42 +44,42 @@ export function mockTranscribe(onChunk: (text: string) => void): TranscribeHandl
   };
 }
 
-export interface CapturePayload {
-  kind: PieceKind;
-  durationSec?: number;
-  text?: string;
-}
-
-let _idSeq = 1000;
-const nextId = () => `m${_idSeq++}`;
-
-/** Wrap a raw capture into a Piece — the post-capture handoff into the pool. */
 export async function mockFinalizeCapture(p: CapturePayload): Promise<Piece> {
   await sleep(60);
   const id = nextId();
   const t = fmtClock();
   if (p.kind === 'voice') {
     return {
-      id, kind: 'voice', t,
+      id,
+      kind: 'voice',
+      t,
       dur: fmtDuration(p.durationSec ?? 0),
       text: p.text || '',
       tag: '心情',
+      blobUri: p.blobUri,
     };
   }
   if (p.kind === 'photo') {
-    return { id, kind: 'photo', t, tag: '街景', cover: TONES[_idSeq % TONES.length] };
+    return {
+      id,
+      kind: 'photo',
+      t,
+      tag: '街景',
+      cover: TONES[_idSeq % TONES.length],
+      blobUri: p.blobUri,
+    };
   }
   return {
-    id, kind: 'video', t,
+    id,
+    kind: 'video',
+    t,
     dur: fmtDuration(p.durationSec ?? 0),
     tag: '日常',
     cover: TONES[_idSeq % TONES.length],
+    blobUri: p.blobUri,
   };
 }
 
-export interface ProgressEvent { stage: 'process' | 'upload'; progress: number; }
-
-/** Local-side compose. ~1.4s, 7%/100ms — matches design timing. */
 export async function mockProcess(_payload: DraftPayload, onTick: (e: ProgressEvent) => void) {
   let p = 0;
   while (p < 100) {
@@ -98,7 +89,6 @@ export async function mockProcess(_payload: DraftPayload, onTick: (e: ProgressEv
   }
 }
 
-/** NAS upload step. ~1.6s, 5%/80ms — matches design timing. */
 export async function mockUpload(_payload: DraftPayload, onTick: (e: ProgressEvent) => void) {
   let p = 0;
   while (p < 100) {
@@ -112,3 +102,11 @@ export async function mockPublish(_payload: DraftPayload): Promise<TargetId[]> {
   await sleep(120);
   return ['blog', 'feed', 'nas'];
 }
+
+export const mockClient: ApiClient = {
+  transcribe: mockTranscribe,
+  finalizeCapture: mockFinalizeCapture,
+  process: mockProcess,
+  upload: mockUpload,
+  publish: mockPublish,
+};

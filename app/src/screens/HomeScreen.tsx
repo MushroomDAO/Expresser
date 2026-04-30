@@ -9,8 +9,8 @@ import {
   mockPublish,
   mockTranscribe,
   mockUpload,
-  type TranscribeHandle,
 } from '../api/mock';
+import type { TranscribeHandle } from '../api/types';
 import { useApp } from '../state/store';
 import { themeFor } from '../theme';
 import { motion, palette } from '../theme/tokens';
