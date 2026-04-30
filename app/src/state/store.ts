@@ -52,8 +52,17 @@ interface AppStore {
 
   pushPiece: (piece: Piece) => void;
   resetPool: () => void;
+}
 
-  windowProgress: () => number;   // 0..1 — share of windowMin elapsed
+/**
+ * Pure helper — share of `windowMin` minutes elapsed since `windowStart`.
+ *
+ * Don't call inside a zustand selector: it reads `Date.now()` and would make
+ * `useSyncExternalStore`'s snapshot drift every frame, looping React.
+ */
+export function computeWindowProgress(windowStart: number, windowMin: number): number {
+  const elapsedMin = (Date.now() - windowStart) / 60000;
+  return Math.max(0, Math.min(1, elapsedMin / windowMin));
 }
 
 const VARIANTS: Variant[] = ['petal', 'rainbow', 'siri', 'glass'];
@@ -108,10 +117,4 @@ export const useApp = create<AppStore>((set, get) => ({
 
   resetPool: () =>
     set({ pool: [], draftPicks: {}, windowStart: Date.now() }),
-
-  windowProgress: () => {
-    const { windowStart, windowMin } = get();
-    const elapsedMin = (Date.now() - windowStart) / 60000;
-    return Math.max(0, Math.min(1, elapsedMin / windowMin));
-  },
 }));

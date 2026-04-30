@@ -2,7 +2,7 @@ import React from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 
 import { PetalLogo } from '../components/PetalLogo';
-import { useApp } from '../state/store';
+import { computeWindowProgress, useApp } from '../state/store';
 import { themeFor } from '../theme';
 import type { State } from '../types';
 
@@ -27,8 +27,9 @@ export function Header() {
   const dark = useApp((s) => s.dark);
   const pool = useApp((s) => s.pool);
   const windowMin = useApp((s) => s.windowMin);
+  const windowStart = useApp((s) => s.windowStart);
   const offlineQueueCount = useApp((s) => s.offlineQueueCount);
-  const wp = useApp((s) => s.windowProgress());
+  const wp = computeWindowProgress(windowStart, windowMin);
   const t = themeFor(dark);
 
   return (
