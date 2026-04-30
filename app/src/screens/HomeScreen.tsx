@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { Platform, Text, View, StyleSheet, Pressable } from 'react-native';
+import { Platform, Text, View, StyleSheet } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 
 import { PetalButton } from '../components/PetalButton';

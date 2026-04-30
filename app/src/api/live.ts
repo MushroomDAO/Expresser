@@ -30,31 +30,6 @@ export class UploadError extends Error {
   }
 }
 
-async function readChunked<T>(
-  res: Response,
-  onText: (chunk: string) => void,
-  parse: (text: string) => T | undefined,
-): Promise<T | undefined> {
-  if (!res.body) {
-    const text = await res.text();
-    onText(text);
-    return parse(text);
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  let result: T | undefined;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    onText(buf);
-    const parsed = parse(buf);
-    if (parsed !== undefined) result = parsed;
-  }
-  return result ?? parse(buf);
-}
-
 /**
  * Live upload: streams progress while POSTing the draft as JSON to NAS_URL.
  * The NAS is expected to respond 200 with `{ ok: true, ... }`.

@@ -26,7 +26,7 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 // teardrop petal — port of `petalShapePath` in design_handoff_expresser/source/phone-app.jsx.
 function petalShapePath(cx: number, cy: number, len: number, wid: number, angleDeg: number) {
   const N = 40;
-  const pts: Array<[number, number]> = [];
+  const pts: [number, number][] = [];
   for (let i = 0; i <= N; i++) {
     const t = i / N;
     const x = t * len;

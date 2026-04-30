@@ -22,12 +22,10 @@ async function main() {
 
   // 1. Streaming ASR — collect chunks for ~1.6s as if the user held the petal.
   console.log('\n── 1. mockTranscribe (1600ms hold) ──');
-  let lastChunk = '';
   let chunkCount = 0;
   const t1 = t0();
   const handle = mockTranscribe((chunk) => {
     chunkCount++;
-    lastChunk = chunk;
     console.log(`  [${since(t1)}] chunk #${chunkCount}: ${chunk}`);
   });
   await new Promise((r) => setTimeout(r, 1600));
