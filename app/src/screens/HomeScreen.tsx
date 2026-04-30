@@ -1,16 +1,12 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { Text, View, StyleSheet, Pressable } from 'react-native';
+import { Platform, Text, View, StyleSheet, Pressable } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 
 import { PetalButton } from '../components/PetalButton';
-import {
-  mockFinalizeCapture,
-  mockProcess,
-  mockPublish,
-  mockTranscribe,
-  mockUpload,
-} from '../api/mock';
+import { api } from '../api';
+import { startRecording as startAudioRecording, type RecordingHandle } from '../api/audio';
 import type { TranscribeHandle } from '../api/types';
+import { CameraScreen } from './CameraScreen';
 import { useApp } from '../state/store';
 import { themeFor } from '../theme';
 import { motion, palette } from '../theme/tokens';
@@ -35,6 +31,7 @@ export function HomeScreen() {
   const t = themeFor(dark);
 
   const transcribeHandle = useRef<TranscribeHandle | null>(null);
+  const audioHandle = useRef<RecordingHandle | null>(null);
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const recStart = useRef<number>(0);
   const ctdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -49,7 +46,20 @@ export function HomeScreen() {
     recTimer.current = setInterval(() => {
       setRecSeconds((Date.now() - recStart.current) / 1000);
     }, 100);
-    transcribeHandle.current = mockTranscribe((chunk) => setTranscript(chunk));
+    transcribeHandle.current = api.transcribe((chunk) => setTranscript(chunk));
+
+    // Real audio capture: native only. Web stays text-mock to keep the smoke
+    // test self-contained.
+    if (Platform.OS !== 'web') {
+      startAudioRecording()
+        .then((h) => {
+          audioHandle.current = h;
+        })
+        .catch((err) => {
+          // Permission denied / unsupported — keep ASR running text-only.
+          console.warn('audio capture unavailable:', err?.message ?? err);
+        });
+    }
   }, [setState, setTranscript, setRecSeconds]);
 
   const stopRecording = useCallback(
@@ -60,13 +70,34 @@ export function HomeScreen() {
         ? await transcribeHandle.current.finish()
         : '';
       transcribeHandle.current = null;
+
+      let blobUri: string | undefined;
+      if (audioHandle.current) {
+        try {
+          if (save) {
+            const r = await audioHandle.current.stop();
+            blobUri = r.uri ?? undefined;
+          } else {
+            await audioHandle.current.cancel();
+          }
+        } catch (err) {
+          console.warn('audio stop failed:', err);
+        }
+        audioHandle.current = null;
+      }
+
       if (!save) {
         setTranscript('');
         setRecSeconds(0);
         setState('idle');
         return;
       }
-      const piece = await mockFinalizeCapture({ kind: 'voice', durationSec: dur, text });
+      const piece = await api.finalizeCapture({
+        kind: 'voice',
+        durationSec: dur,
+        text,
+        blobUri,
+      });
       pushPiece(piece);
       setState('pool');
       flashTimer.current = setTimeout(() => {
@@ -81,6 +112,10 @@ export function HomeScreen() {
   const cancelRecording = useCallback(() => {
     if (transcribeHandle.current) transcribeHandle.current.cancel();
     transcribeHandle.current = null;
+    if (audioHandle.current) {
+      audioHandle.current.cancel().catch(() => {});
+      audioHandle.current = null;
+    }
     if (recTimer.current) clearInterval(recTimer.current);
     setTranscript('');
     setRecSeconds(0);
@@ -89,20 +124,31 @@ export function HomeScreen() {
 
   // ── countdown + publish flow ──
   const runPublishFlow = useCallback(async () => {
+    const payload = { pieces: useApp.getState().pool, createdAt: Date.now() };
     setState('processing');
     setProgress(0);
-    await mockProcess({ pieces: [], createdAt: Date.now() }, (e) => setProgress(e.progress));
-    setState('uploading');
-    setProgress(0);
-    await mockUpload({ pieces: [], createdAt: Date.now() }, (e) => setProgress(e.progress));
-    const targets = await mockPublish({ pieces: [], createdAt: Date.now() });
-    setPublishedTo(targets);
-    setState('published');
-    flashTimer.current = setTimeout(() => {
-      setState('idle');
-      setPublishedTo([]);
+    try {
+      await api.process(payload, (e) => setProgress(e.progress));
+      setState('uploading');
       setProgress(0);
-    }, 2400);
+      await api.upload(payload, (e) => setProgress(e.progress));
+      const targets = await api.publish(payload);
+      setPublishedTo(targets);
+      setState('published');
+      flashTimer.current = setTimeout(() => {
+        setState('idle');
+        setPublishedTo([]);
+        setProgress(0);
+      }, 2400);
+    } catch (err) {
+      console.warn('publish failed:', err);
+      // Drop into offline state — user can retry from queue.
+      setState('offline');
+      flashTimer.current = setTimeout(() => {
+        setState('idle');
+        setProgress(0);
+      }, 2400);
+    }
   }, [setProgress, setPublishedTo, setState]);
 
   const startCountdown = useCallback(() => {
@@ -149,10 +195,9 @@ export function HomeScreen() {
       if (state === 'recording') cancelRecording();
     },
     onUpThreshold: () => {
-      // Camera not yet wired in this MVP — log for now and bail back to idle.
       cancelRecording();
-      setState('camera');
-      flashTimer.current = setTimeout(() => setState('idle'), 1500);
+      setState('transition');
+      flashTimer.current = setTimeout(() => setState('camera'), motion.transitionMs);
     },
     onSwipeLeft: () => {
       cycleVariant();
@@ -165,6 +210,9 @@ export function HomeScreen() {
   // ── render ──
   if (state === 'compose') {
     return <ComposeView onConfirm={confirmCompose} onCancel={() => setState('idle')} />;
+  }
+  if (state === 'camera' || state === 'capturing' || state === 'recording_video') {
+    return <CameraScreen onClose={() => setState('idle')} />;
   }
 
   return (
@@ -191,18 +239,6 @@ export function HomeScreen() {
         )}
 
         {state === 'pool' && <PoolStrip />}
-
-        {state === 'camera' && (
-          <View style={[styles.cameraStub, { backgroundColor: t.card }]}>
-            <Text style={{ color: t.fg, fontWeight: '600' }}>相机预览 (MVP 占位)</Text>
-            <Text style={{ color: t.fgSub, marginTop: 6 }}>下个迭代接 expo-camera</Text>
-            <Pressable
-              onPress={() => setState('idle')}
-              style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.7 }]}>
-              <Text style={{ color: '#fff' }}>关闭</Text>
-            </Pressable>
-          </View>
-        )}
       </View>
 
       {(state === 'idle' || state === 'pool') && (
@@ -238,21 +274,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     backgroundColor: 'rgba(0,0,0,0.04)',
-    borderRadius: 100,
-  },
-  cameraStub: {
-    marginTop: 28,
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    borderRadius: 18,
-    alignItems: 'center',
-    width: '80%',
-  },
-  closeBtn: {
-    marginTop: 14,
-    backgroundColor: palette.primary,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
     borderRadius: 100,
   },
 });
