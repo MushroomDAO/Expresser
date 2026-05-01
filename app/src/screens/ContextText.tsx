@@ -27,7 +27,7 @@ export function ContextText({ onCancelCountdown }: Props) {
   if (state === 'idle') {
     return (
       <View style={styles.wrap}>
-        <Text style={[styles.eyebrow, { color: t.fgSub }]}>Hold · Speak · Bloom</Text>
+        <Text style={[styles.eyebrow, { color: t.fgSub }]}>Hold · Record · Bloom</Text>
         <Text style={[styles.h1, { color: t.fg }]}>
           片刻的表达,<Text style={styles.h1em}>生活的诗篇</Text>
         </Text>

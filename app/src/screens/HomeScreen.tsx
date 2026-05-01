@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Text, View, StyleSheet } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 
@@ -15,12 +15,15 @@ import { ContextText } from './ContextText';
 import { PoolStrip } from './PoolStrip';
 import { DraftToast } from './Toast';
 import { ComposeView } from './ComposeView';
+import { AboutOverlay } from './AboutOverlay';
+import { PoolOverlay } from './PoolOverlay';
 import { usePetalGesture } from '../gestures/usePetalGesture';
 
 export function HomeScreen() {
   const state = useApp((s) => s.state);
   const setState = useApp((s) => s.setState);
   const dark = useApp((s) => s.dark);
+  const setDark = useApp((s) => s.setDark);
   const setTranscript = useApp((s) => s.setTranscript);
   const setRecSeconds = useApp((s) => s.setRecSeconds);
   const setProgress = useApp((s) => s.setProgress);
@@ -29,6 +32,8 @@ export function HomeScreen() {
   const pushPiece = useApp((s) => s.pushPiece);
   const cycleVariant = useApp((s) => s.cycleVariant);
   const t = themeFor(dark);
+
+  const [overlay, setOverlay] = useState<'about' | 'pool' | null>(null);
 
   const transcribeHandle = useRef<TranscribeHandle | null>(null);
   const audioHandle = useRef<RecordingHandle | null>(null);
@@ -217,7 +222,11 @@ export function HomeScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: t.bg }]}>
-      <Header />
+      <Header
+        onAbout={() => setOverlay('about')}
+        onPool={() => setOverlay('pool')}
+        onToggleDark={() => setDark(!dark)}
+      />
 
       <View style={styles.stage}>
         <ContextText onCancelCountdown={cancelCountdown} />
@@ -247,6 +256,13 @@ export function HomeScreen() {
           onCompose={() => setState('compose')}
         />
       )}
+
+      <AboutOverlay visible={overlay === 'about'} onClose={() => setOverlay(null)} />
+      <PoolOverlay
+        visible={overlay === 'pool'}
+        onClose={() => setOverlay(null)}
+        onCompose={() => setState('compose')}
+      />
     </View>
   );
 }
