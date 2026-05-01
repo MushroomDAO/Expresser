@@ -31,9 +31,13 @@ export function HomeScreen() {
   const setCtd = useApp((s) => s.setCtd);
   const pushPiece = useApp((s) => s.pushPiece);
   const cycleVariant = useApp((s) => s.cycleVariant);
+  const variant = useApp((s) => s.variant);
+  const publishedTo = useApp((s) => s.publishedTo);
   const t = themeFor(dark);
 
   const [overlay, setOverlay] = useState<'about' | 'pool' | null>(null);
+  const [swipeFlash, setSwipeFlash] = useState<string | null>(null);
+  const swipeFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const transcribeHandle = useRef<TranscribeHandle | null>(null);
   const audioHandle = useRef<RecordingHandle | null>(null);
@@ -44,6 +48,7 @@ export function HomeScreen() {
 
   // ── recording lifecycle ──
   const startRecording = useCallback(() => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
     setState('recording');
     setTranscript('');
     setRecSeconds(0);
@@ -185,6 +190,7 @@ export function HomeScreen() {
       if (recTimer.current) clearInterval(recTimer.current);
       if (ctdTimer.current) clearInterval(ctdTimer.current);
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (swipeFlashTimer.current) clearTimeout(swipeFlashTimer.current);
       if (transcribeHandle.current) transcribeHandle.current.cancel();
     },
     [],
@@ -205,7 +211,10 @@ export function HomeScreen() {
       flashTimer.current = setTimeout(() => setState('camera'), motion.transitionMs);
     },
     onSwipeLeft: () => {
-      cycleVariant();
+      const next = cycleVariant();
+      setSwipeFlash(next.toUpperCase());
+      if (swipeFlashTimer.current) clearTimeout(swipeFlashTimer.current);
+      swipeFlashTimer.current = setTimeout(() => setSwipeFlash(null), motion.swipeFlashMs);
     },
     onSwipeRight: () => {
       if (state === 'idle' || state === 'pool') setState('compose');
@@ -248,6 +257,36 @@ export function HomeScreen() {
         )}
 
         {state === 'pool' && <PoolStrip />}
+
+        {/* published target cards */}
+        {state === 'published' && (
+          <View style={styles.targets}>
+            {(['blog', 'feed', 'reels', 'nas'] as const).map((id) => {
+              const lit = publishedTo.includes(id);
+              const labels: Record<string, { label: string; sub: string }> = {
+                blog:  { label: 'Personal blog',   sub: 'RSS' },
+                feed:  { label: 'Photo feed',       sub: 'Image + caption' },
+                reels: { label: 'Short video',      sub: 'Reel' },
+                nas:   { label: 'Private archive',  sub: 'NAS backup' },
+              };
+              return (
+                <View
+                  key={id}
+                  style={[
+                    styles.targetCard,
+                    { backgroundColor: lit ? palette.success : t.card },
+                  ]}>
+                  <Text style={{ color: lit ? '#fff' : t.fg, fontWeight: '600', fontSize: 13 }}>
+                    {lit ? '✓ ' : ''}{labels[id].label}
+                  </Text>
+                  <Text style={{ color: lit ? 'rgba(255,255,255,0.8)' : t.fgSub, fontSize: 11, marginTop: 2 }}>
+                    {labels[id].sub}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       {(state === 'idle' || state === 'pool') && (
@@ -255,6 +294,13 @@ export function HomeScreen() {
           onTapDraft={startCountdown}
           onCompose={() => setState('compose')}
         />
+      )}
+
+      {/* swipe-left variant flash */}
+      {swipeFlash && (
+        <View pointerEvents="none" style={styles.swipeFlash}>
+          <Text style={[styles.swipeFlashText, { color: t.fg }]}>{swipeFlash}</Text>
+        </View>
       )}
 
       <AboutOverlay visible={overlay === 'about'} onClose={() => setOverlay(null)} />
@@ -291,5 +337,36 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: 'rgba(0,0,0,0.04)',
     borderRadius: 100,
+  },
+  targets: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
+  },
+  targetCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  swipeFlash: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  swipeFlashText: {
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 3,
+    opacity: 0.85,
   },
 });

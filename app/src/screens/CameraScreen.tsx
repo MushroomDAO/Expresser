@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 
 import { api } from '../api';
@@ -33,9 +34,11 @@ export function CameraScreen({ onClose }: Props) {
   const setState = useApp((s) => s.setState);
   const pushPiece = useApp((s) => s.pushPiece);
   const t = themeFor(dark);
+  const insets = useSafeAreaInsets();
   const [perm, requestPerm] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
   const [recording, setRecording] = useState(false);
+  const recordingRef = useRef(false);
   const [facing] = useState<CameraType>('back');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recStart = useRef<number>(0);
@@ -68,6 +71,7 @@ export function CameraScreen({ onClose }: Props) {
 
   const startVideo = useCallback(async () => {
     if (!cameraRef.current) return;
+    recordingRef.current = true;
     setRecording(true);
     setState('recording_video');
     recStart.current = Date.now();
@@ -89,6 +93,7 @@ export function CameraScreen({ onClose }: Props) {
       console.warn('video capture failed:', err);
       setState('camera');
     } finally {
+      recordingRef.current = false;
       setRecording(false);
     }
   }, [onClose, pushPiece, setState]);
@@ -110,10 +115,10 @@ export function CameraScreen({ onClose }: Props) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
       takePhoto();
-    } else if (recording) {
+    } else if (recordingRef.current) {
       stopVideo();
     }
-  }, [recording, stopVideo, takePhoto]);
+  }, [stopVideo, takePhoto]);
 
   // ── render ──
   if (Platform.OS === 'web') {
@@ -166,7 +171,7 @@ export function CameraScreen({ onClose }: Props) {
         mode={recording ? 'video' : 'picture'}
       />
 
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <Pressable onPress={onClose} hitSlop={12}>
           <Text style={styles.topBtn}>✕</Text>
         </Pressable>

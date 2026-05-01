@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View, StyleSheet } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 
@@ -36,7 +36,13 @@ export function Header({ onAbout, onPool, onToggleDark }: Props) {
   const windowMin = useApp((s) => s.windowMin);
   const windowStart = useApp((s) => s.windowStart);
   const offlineQueueCount = useApp((s) => s.offlineQueueCount);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const wp = computeWindowProgress(windowStart, windowMin);
+  void tick; // ensure effect re-runs the progress computation each minute
   const t = themeFor(dark);
   const isIdle = state === 'idle';
 

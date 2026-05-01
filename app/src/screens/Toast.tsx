@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View, StyleSheet } from 'react-native';
 
 import { PetalLogo } from '../components/PetalLogo';
@@ -16,6 +16,12 @@ export function DraftToast({ onTapDraft, onCompose }: Props) {
   const pool = useApp((s) => s.pool);
   const windowMin = useApp((s) => s.windowMin);
   const windowStart = useApp((s) => s.windowStart);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  void tick;
   const wp = computeWindowProgress(windowStart, windowMin);
   const t = themeFor(dark);
 

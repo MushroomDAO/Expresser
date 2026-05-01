@@ -6,7 +6,7 @@ import { themeFor } from '../theme';
 import { typography } from '../theme/tokens';
 
 const fmt = (s: number) =>
-  `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toFixed(0).padStart(2, '0')}`;
+  `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 
 interface Props {
   onCancelCountdown?: () => void;

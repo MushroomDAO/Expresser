@@ -24,11 +24,11 @@ interface Callbacks {
  */
 export function usePetalGesture(cbs: Callbacks) {
   // Ref-based state — we use UI thread + JS thread bridges via runOnJS.
-  const startRef = useRef<{ x: number; y: number; t: number; recording: boolean; swipe: boolean } | null>(null);
+  const startRef = useRef<{ x: number; y: number; t: number; recording: boolean; swipe: boolean; upFired: boolean } | null>(null);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const begin = (x: number, y: number) => {
-    startRef.current = { x, y, t: Date.now(), recording: false, swipe: false };
+    startRef.current = { x, y, t: Date.now(), recording: false, swipe: false, upFired: false };
     if (armTimer.current) clearTimeout(armTimer.current);
     armTimer.current = setTimeout(() => {
       const s = startRef.current;
@@ -53,7 +53,8 @@ export function usePetalGesture(cbs: Callbacks) {
     if (s.swipe) return;
 
     // vertical up — Reanimated y axis: dy negative = up. We use positive = up.
-    if (s.recording && -dy > gestures.swipeUpPx) {
+    if (s.recording && !s.upFired && -dy > gestures.swipeUpPx) {
+      s.upFired = true;
       cbs.onUpThreshold();
     }
   };
