@@ -117,22 +117,22 @@ export const useApp = create<AppStore>((set, get) => ({
       return { pool: [...s.pool, piece], draftPicks: allPicks };
     }),
 
-  removePiece: (pieceId) =>
-    set((s) => {
-      const piece = s.pool.find((p) => p.id === pieceId);
-      // Delete the associated blob from cache (best-effort, non-blocking).
-      if (piece?.blobUri) {
-        try {
-          new File(piece.blobUri).delete();
-        } catch {
-          // File may already be gone — ignore.
-        }
-      }
+  removePiece: (pieceId) => {
+    // Read blobUri outside the reducer to keep set() pure.
+    // In React StrictMode reducers are invoked twice; side-effects here would
+    // fire twice and the second call would throw on an already-deleted file.
+    const piece = useApp.getState().pool.find((p) => p.id === pieceId);
+    if (piece?.blobUri) {
+      try { new File(piece.blobUri).delete(); } catch { /* best-effort */ }
+    }
+    // Pure state update — no side-effects inside the reducer.
+    useApp.setState((s) => {
       const pool = s.pool.filter((p) => p.id !== pieceId);
       const draftPicks = { ...s.draftPicks };
       delete draftPicks[pieceId];
       return { pool, draftPicks };
-    }),
+    });
+  },
 
   resetPool: () =>
     set({ pool: [], draftPicks: {}, windowStart: Date.now() }),

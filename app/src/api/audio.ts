@@ -38,20 +38,17 @@ export async function startRecording(): Promise<RecordingHandle> {
       return { uri, durationMs: Date.now() - startedAt };
     },
     cancel: async () => {
-      let uri: string | null = null;
+      // Capture the URI before stopping — expo-av clears it after unload.
+      // Use recording.getURI() (expo-av API), NOT recorder.uri (expo-audio API).
+      const uri = recording.getURI();
       try {
-        uri = recording.getURI();
         await recording.stopAndUnloadAsync();
       } catch {
         // already stopped — ignore
       }
       // Delete the temp file so it doesn't accumulate in the cache directory.
       if (uri) {
-        try {
-          new File(uri).delete();
-        } catch {
-          // Best-effort — file may already be gone.
-        }
+        try { new File(uri).delete(); } catch { /* best-effort */ }
       }
     },
   };
