@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -43,6 +44,9 @@ export function CameraScreen({ onClose }: Props) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recStart = useRef<number>(0);
 
+  // ── preview state: non-null while waiting for user to confirm/retake ──
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+
   // Auto-prompt on mount.
   useEffect(() => {
     if (perm && !perm.granted && perm.canAskAgain) requestPerm();
@@ -53,10 +57,26 @@ export function CameraScreen({ onClose }: Props) {
     setState('capturing');
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
-      const piece = await api.finalizeCapture({
-        kind: 'photo',
-        blobUri: photo?.uri,
-      });
+      // Enter preview mode — user must confirm before the photo enters the pool.
+      if (photo?.uri) {
+        setState('camera');
+        setPreviewUri(photo.uri);
+      } else {
+        setState('camera');
+      }
+    } catch (err) {
+      console.warn('photo capture failed:', err);
+      setState('camera');
+    }
+  }, [setState]);
+
+  /** User taps "使用" — finalize the photo and add it to the pool. */
+  const confirmPhoto = useCallback(async () => {
+    if (!previewUri) return;
+    const uri = previewUri;
+    setPreviewUri(null);
+    try {
+      const piece = await api.finalizeCapture({ kind: 'photo', blobUri: uri });
       pushPiece(piece);
       setState('pool');
       setTimeout(() => {
@@ -64,10 +84,16 @@ export function CameraScreen({ onClose }: Props) {
         onClose();
       }, motion.poolFlashMs);
     } catch (err) {
-      console.warn('photo capture failed:', err);
+      console.warn('photo finalize failed:', err);
       setState('camera');
     }
-  }, [onClose, pushPiece, setState]);
+  }, [previewUri, onClose, pushPiece, setState]);
+
+  /** User taps "重拍" — discard the preview and return to viewfinder. */
+  const retakePhoto = useCallback(() => {
+    setPreviewUri(null);
+    setState('camera');
+  }, [setState]);
 
   const startVideo = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -162,6 +188,42 @@ export function CameraScreen({ onClose }: Props) {
     );
   }
 
+  // ── photo preview confirm screen ──
+  if (previewUri) {
+    return (
+      <View style={styles.root}>
+        <Image
+          source={{ uri: previewUri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          testID="preview-image"
+        />
+        {/* Allow closing even in preview mode — photo is silently discarded */}
+        <View style={[styles.topBar, { top: insets.top + 8 }]}>
+          <Pressable onPress={onClose} hitSlop={12} testID="btn-close-preview">
+            <Text style={styles.topBtn}>✕</Text>
+          </Pressable>
+          <View style={{ width: 24 }} />
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={[styles.previewActions, { bottom: insets.bottom + 32 }]}>
+          <Pressable
+            onPress={retakePhoto}
+            style={({ pressed }) => [styles.previewBtn, styles.previewBtnRetake, pressed && { opacity: 0.7 }]}
+            testID="btn-retake">
+            <Text style={styles.previewBtnText}>重拍</Text>
+          </Pressable>
+          <Pressable
+            onPress={confirmPhoto}
+            style={({ pressed }) => [styles.previewBtn, styles.previewBtnUse, pressed && { opacity: 0.85 }]}
+            testID="btn-use">
+            <Text style={[styles.previewBtnText, { color: '#fff' }]}>使用</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <CameraView
@@ -172,7 +234,7 @@ export function CameraScreen({ onClose }: Props) {
       />
 
       <View style={[styles.topBar, { top: insets.top + 8 }]}>
-        <Pressable onPress={onClose} hitSlop={12}>
+        <Pressable onPress={onClose} hitSlop={12} testID="btn-close-camera">
           <Text style={styles.topBtn}>✕</Text>
         </Pressable>
         <Text style={styles.modeLabel}>{MODES.find((m) => m.id === camMode)?.label}</Text>
@@ -290,5 +352,33 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 100,
     marginTop: 18,
+  },
+  previewActions: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    paddingHorizontal: 32,
+  },
+  previewBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  previewBtnRetake: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  previewBtnUse: {
+    backgroundColor: palette.primary,
+  },
+  previewBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
