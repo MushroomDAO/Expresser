@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { File } from 'expo-file-system';
 import type {
   CameraMode,
   Piece,
@@ -51,6 +52,7 @@ interface AppStore {
   setOnline: (o: boolean) => void;
 
   pushPiece: (piece: Piece) => void;
+  removePiece: (pieceId: string) => void;
   resetPool: () => void;
 }
 
@@ -113,6 +115,23 @@ export const useApp = create<AppStore>((set, get) => ({
     set((s) => {
       const allPicks = { ...s.draftPicks, [piece.id]: true };
       return { pool: [...s.pool, piece], draftPicks: allPicks };
+    }),
+
+  removePiece: (pieceId) =>
+    set((s) => {
+      const piece = s.pool.find((p) => p.id === pieceId);
+      // Delete the associated blob from cache (best-effort, non-blocking).
+      if (piece?.blobUri) {
+        try {
+          new File(piece.blobUri).delete();
+        } catch {
+          // File may already be gone — ignore.
+        }
+      }
+      const pool = s.pool.filter((p) => p.id !== pieceId);
+      const draftPicks = { ...s.draftPicks };
+      delete draftPicks[pieceId];
+      return { pool, draftPicks };
     }),
 
   resetPool: () =>

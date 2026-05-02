@@ -6,6 +6,7 @@
 // version; migration TODO is filed in tracking.
 
 import { Audio } from 'expo-av';
+import { File } from 'expo-file-system';
 
 import { TRANSCRIPT_CHUNKS } from '../state/samples';
 import type { TranscribeHandle } from './types';
@@ -37,10 +38,20 @@ export async function startRecording(): Promise<RecordingHandle> {
       return { uri, durationMs: Date.now() - startedAt };
     },
     cancel: async () => {
+      let uri: string | null = null;
       try {
+        uri = recording.getURI();
         await recording.stopAndUnloadAsync();
       } catch {
         // already stopped — ignore
+      }
+      // Delete the temp file so it doesn't accumulate in the cache directory.
+      if (uri) {
+        try {
+          new File(uri).delete();
+        } catch {
+          // Best-effort — file may already be gone.
+        }
       }
     },
   };
