@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, StyleSheet, Pressable, FlatList } from 'react-native';
+import { Alert, Text, View, StyleSheet, Pressable, FlatList } from 'react-native';
 
 import { useApp } from '../state/store';
 import { themeFor } from '../theme';
@@ -53,6 +53,12 @@ export function ComposeView({ onConfirm, onCancel }: Props) {
         )}
       />
 
+      {pool.length === 0 && (
+        <Text style={{ color: t.fgSub, textAlign: 'center', marginBottom: 8, fontSize: 13 }}>
+          请先录音或拍照再发布
+        </Text>
+      )}
+
       <View style={styles.footer}>
         <Pressable
           onPress={onCancel}
@@ -101,7 +107,7 @@ function Row({
         <Text style={{ fontSize: 22 }}>{KIND_EMOJI[piece.kind] ?? '·'}</Text>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.rowTitle, { color: t.fg }]} numberOfLines={2}>
+        <Text style={[styles.rowTitle, { color: t.fg }]} numberOfLines={2} ellipsizeMode="tail">
           {desc}
         </Text>
         <Text style={[styles.rowMeta, { color: t.fgSub }]}>
@@ -109,7 +115,12 @@ function Row({
         </Text>
       </View>
       <Pressable
-        onPress={onDelete}
+        onPress={() =>
+          Alert.alert('删除片段', '确定要删除这个片段吗？', [
+            { text: '取消', style: 'cancel' },
+            { text: '删除', style: 'destructive', onPress: onDelete },
+          ])
+        }
         accessibilityLabel="删除片段"
         style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.6 }]}>
         <Text style={{ color: '#e05252', fontSize: 18, fontWeight: '700' }}>×</Text>
