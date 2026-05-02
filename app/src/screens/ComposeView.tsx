@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { Text, View, StyleSheet, Pressable, FlatList } from 'react-native';
 
 import { useApp } from '../state/store';
 import { themeFor } from '../theme';
@@ -12,7 +12,7 @@ interface Props {
 }
 
 const KIND_EMOJI: Record<string, string> = {
-  voice: '🗣',
+  voice: '🎙',
   photo: '📷',
   video: '🎞',
 };
@@ -20,46 +20,55 @@ const KIND_EMOJI: Record<string, string> = {
 export function ComposeView({ onConfirm, onCancel }: Props) {
   const dark = useApp((s) => s.dark);
   const pool = useApp((s) => s.pool);
-  const picks = useApp((s) => s.draftPicks);
-  const togglePick = useApp((s) => s.togglePick);
+  const removePiece = useApp((s) => s.removePiece);
   const t = themeFor(dark);
-
-  const selected = pool.filter((p) => picks[p.id]);
-  const hasVideo = selected.some((p) => p.kind === 'video');
-  const hint = hasVideo ? '将合成 vlog (含字幕)' : '将合成图文 blog';
 
   return (
     <View style={[styles.root, { backgroundColor: t.bg }]}>
       <View style={styles.header}>
         <Text style={[styles.eyebrow, { color: t.fgSub }]}>COMPOSE</Text>
-        <Text style={[styles.title, { color: t.fg }]}>挑选要合成的片段</Text>
+        <Text style={[styles.title, { color: t.fg }]}>编辑片段</Text>
         <Text style={[styles.sub, { color: t.fgSub }]}>
-          {selected.length}/{pool.length} 已选 · {hint}
+          {pool.length} 个片段
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}>
-        {pool.map((p) => (
-          <Row key={p.id} piece={p} active={!!picks[p.id]} onToggle={() => togglePick(p.id)} dark={dark} />
-        ))}
-      </ScrollView>
+      <FlatList
+        data={pool}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={[styles.emptyText, { color: t.fgSub }]}>
+              暂无内容，请先录音或拍照
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Row
+            piece={item}
+            onDelete={() => removePiece(item.id)}
+            dark={dark}
+          />
+        )}
+      />
 
       <View style={styles.footer}>
         <Pressable
           onPress={onCancel}
           style={({ pressed }) => [styles.btn, { backgroundColor: t.card }, pressed && { opacity: 0.85 }]}>
-          <Text style={{ color: t.fg, fontWeight: '600' }}>暂停 · 继续追加</Text>
+          <Text style={{ color: t.fg, fontWeight: '600' }}>取消</Text>
         </Pressable>
         <Pressable
           onPress={onConfirm}
-          disabled={selected.length === 0}
+          disabled={pool.length === 0}
           style={({ pressed }) => [
             styles.btn,
             styles.btnPrimary,
-            selected.length === 0 && { opacity: 0.5 },
+            pool.length === 0 && { opacity: 0.5 },
             pressed && { opacity: 0.85 },
           ]}>
-          <Text style={{ color: '#fff', fontWeight: '700' }}>合成并发布 ({selected.length})</Text>
+          <Text style={{ color: '#fff', fontWeight: '700' }}>发布 ({pool.length})</Text>
         </Pressable>
       </View>
     </View>
@@ -68,30 +77,25 @@ export function ComposeView({ onConfirm, onCancel }: Props) {
 
 function Row({
   piece,
-  active,
-  onToggle,
+  onDelete,
   dark,
 }: {
   piece: Piece;
-  active: boolean;
-  onToggle: () => void;
+  onDelete: () => void;
   dark: boolean;
 }) {
   const t = themeFor(dark);
   const desc =
     piece.kind === 'voice'
-      ? piece.text || '语音片段'
+      ? piece.text || `语音片段${piece.dur ? ` · ${piece.dur}` : ''}`
       : piece.kind === 'photo'
       ? '照片'
       : `视频 · ${piece.dur ?? ''}`;
   return (
-    <Pressable
-      onPress={onToggle}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.row,
-        { backgroundColor: active ? `${palette.primary}1f` : t.card },
-        active && { borderColor: palette.primary, borderWidth: 1.5 },
-        pressed && { opacity: 0.85 },
+        { backgroundColor: t.card },
       ]}>
       <View style={[styles.thumb, { backgroundColor: dark ? '#3a3530' : '#fff' }]}>
         <Text style={{ fontSize: 22 }}>{KIND_EMOJI[piece.kind] ?? '·'}</Text>
@@ -104,14 +108,13 @@ function Row({
           {piece.t} {piece.tag ? `· ${piece.tag}` : ''}
         </Text>
       </View>
-      <View
-        style={[
-          styles.check,
-          { borderColor: active ? palette.primary : t.fgSub, backgroundColor: active ? palette.primary : 'transparent' },
-        ]}>
-        {active && <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>✓</Text>}
-      </View>
-    </Pressable>
+      <Pressable
+        onPress={onDelete}
+        accessibilityLabel="删除片段"
+        style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.6 }]}>
+        <Text style={{ color: '#e05252', fontSize: 18, fontWeight: '700' }}>×</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -121,6 +124,13 @@ const styles = StyleSheet.create({
   eyebrow: { fontSize: 11, letterSpacing: 1.98, opacity: 0.7 },
   title: { fontSize: 22, fontWeight: '700', marginTop: 6 },
   sub: { fontSize: 13, marginTop: 4 },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+  },
+  emptyText: { fontSize: 15, textAlign: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -132,7 +142,13 @@ const styles = StyleSheet.create({
   thumb: { width: 48, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   rowTitle: { fontSize: 14, fontWeight: '500' },
   rowMeta: { fontSize: 11, marginTop: 4 },
-  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+  },
   footer: {
     position: 'absolute',
     left: 16,
