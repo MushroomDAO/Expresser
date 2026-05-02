@@ -42,6 +42,7 @@ export function CameraScreen({ onClose }: Props) {
   const recordingRef = useRef(false);
   const [facing] = useState<CameraType>('back');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recStart = useRef<number>(0);
 
   // ── preview state: non-null while waiting for user to confirm/retake ──
@@ -51,6 +52,13 @@ export function CameraScreen({ onClose }: Props) {
   useEffect(() => {
     if (perm && !perm.granted && perm.canAskAgain) requestPerm();
   }, [perm, requestPerm]);
+
+  // Cleanup flash timer on unmount to prevent setState-after-unmount.
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    };
+  }, []);
 
   const takePhoto = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -74,18 +82,18 @@ export function CameraScreen({ onClose }: Props) {
   const confirmPhoto = useCallback(async () => {
     if (!previewUri) return;
     const uri = previewUri;
-    setPreviewUri(null);
+    // Do NOT clear previewUri here — wait until finalize succeeds so the user
+    // can retry if the API call fails (Fix 1).
     try {
       const piece = await api.finalizeCapture({ kind: 'photo', blobUri: uri });
+      setPreviewUri(null);           // Success — safe to clear now.
       pushPiece(piece);
       setState('pool');
-      setTimeout(() => {
-        setState('idle');
-        onClose();
-      }, motion.poolFlashMs);
+      flashTimer.current = setTimeout(() => { setState('idle'); onClose(); }, motion.poolFlashMs);
     } catch (err) {
       console.warn('photo finalize failed:', err);
       setState('camera');
+      // previewUri stays set — user can tap "使用" again to retry.
     }
   }, [previewUri, onClose, pushPiece, setState]);
 
@@ -111,7 +119,7 @@ export function CameraScreen({ onClose }: Props) {
       });
       pushPiece(piece);
       setState('pool');
-      setTimeout(() => {
+      flashTimer.current = setTimeout(() => {
         setState('idle');
         onClose();
       }, motion.poolFlashMs);
@@ -197,6 +205,7 @@ export function CameraScreen({ onClose }: Props) {
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
           testID="preview-image"
+          onError={() => { setPreviewUri(null); setState('camera'); }}
         />
         {/* Allow closing even in preview mode — photo is silently discarded */}
         <View style={[styles.topBar, { top: insets.top + 8 }]}>

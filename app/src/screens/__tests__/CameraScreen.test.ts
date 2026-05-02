@@ -48,16 +48,23 @@ function makePreviewMachine(onClose: () => void) {
     }
   }
 
-  async function confirmPhoto() {
+  async function confirmPhoto({ fail = false } = {}) {
     if (!previewUri) return;
     const uri = previewUri;
-    previewUri = null;
-    const piece = await mockFinalizeCapture({ kind: 'photo', blobUri: uri });
-    getState().pushPiece(piece);
-    getState().setState('pool');
-    // Skip the poolFlashMs setTimeout delay in tests — invoke onClose immediately.
-    getState().setState('idle');
-    onClose();
+    // Mirror Fix 1: do NOT clear previewUri before the async call succeeds.
+    try {
+      if (fail) throw new Error('simulated finalize failure');
+      const piece = await mockFinalizeCapture({ kind: 'photo', blobUri: uri });
+      previewUri = null;             // Success — safe to clear now.
+      getState().pushPiece(piece);
+      getState().setState('pool');
+      // Skip the poolFlashMs setTimeout delay in tests — invoke onClose immediately.
+      getState().setState('idle');
+      onClose();
+    } catch {
+      getState().setState('camera');
+      // previewUri stays set — user can retry.
+    }
   }
 
   function retakePhoto() {
@@ -146,11 +153,27 @@ describe('CameraScreen — photo preview state machine', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('confirmPhoto clears previewUri before finalizing', async () => {
+  it('confirmPhoto clears previewUri after successful finalizing', async () => {
     const m = makePreviewMachine(vi.fn());
     await m.takePhoto();
     await m.confirmPhoto();
     expect(m.getPreviewUri()).toBeNull();
+  });
+
+  it('confirmPhoto preserves previewUri when finalizeCapture throws (user can retry)', async () => {
+    const onClose = vi.fn();
+    const m = makePreviewMachine(onClose);
+
+    await m.takePhoto();
+    expect(m.getPreviewUri()).toBe(FAKE_URI);
+
+    await m.confirmPhoto({ fail: true });
+
+    // previewUri must still be set so the user can tap "使用" again.
+    expect(m.getPreviewUri()).toBe(FAKE_URI);
+    expect(useApp.getState().pool).toHaveLength(0);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(useApp.getState().state).toBe('camera');
   });
 
   it('confirmPhoto is a no-op when previewUri is null (guards against double-tap)', async () => {
