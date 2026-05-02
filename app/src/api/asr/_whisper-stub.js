@@ -16,4 +16,11 @@
  * metro.config.js once whisper.rn is compatible with expo-file-system v19.
  */
 
-module.exports = {};
+module.exports = new Proxy({}, {
+  get(_, prop) {
+    throw new Error(
+      `whisper.rn is not available: '${String(prop)}' cannot be called. ` +
+      'See docs/decisions/ADR-003-local-asr-blocked.md'
+    );
+  }
+});
