@@ -4,10 +4,9 @@ import { Text, View, StyleSheet, Pressable } from 'react-native';
 import { useApp } from '../state/store';
 import { themeFor } from '../theme';
 import { typography } from '../theme/tokens';
-import type { State } from '../types';
 
 const fmt = (s: number) =>
-  `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toFixed(0).padStart(2, '0')}`;
+  `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 
 interface Props {
   onCancelCountdown?: () => void;
@@ -28,12 +27,23 @@ export function ContextText({ onCancelCountdown }: Props) {
   if (state === 'idle') {
     return (
       <View style={styles.wrap}>
-        <Text style={[styles.eyebrow, { color: t.fgSub }]}>Hold · Speak · Bloom</Text>
+        <Text style={[styles.eyebrow, { color: t.fgSub }]}>Hold · Record · Bloom</Text>
         <Text style={[styles.h1, { color: t.fg }]}>
           片刻的表达,<Text style={styles.h1em}>生活的诗篇</Text>
         </Text>
         <Text style={[styles.sub, { color: t.fgSub }]}>
           自动汇成 {windowMin} 分钟一篇 · 发前 5 秒可拦
+        </Text>
+      </View>
+    );
+  }
+  if (state === 'transcribing') {
+    return (
+      <View style={styles.wrap}>
+        <Text style={[styles.eyebrow, { color: t.fgSub }]}>TRANSCRIBING</Text>
+        <Text style={[styles.h2, { color: t.fg }]}>识别中…</Text>
+        <Text style={[styles.transcript, { color: t.fgSub }]}>
+          {transcript || '正在处理语音…'}
         </Text>
       </View>
     );
