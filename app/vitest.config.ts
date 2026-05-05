@@ -13,6 +13,11 @@ export default defineConfig({
         __dirname,
         'node_modules/expo-file-system/mocks/FileSystem.ts',
       ),
+      // AsyncStorage requires native bindings; swap for in-memory stub.
+      '@react-native-async-storage/async-storage': path.resolve(
+        __dirname,
+        'src/__test-setup__/asyncStorage.stub.ts',
+      ),
     },
   },
   test: {
