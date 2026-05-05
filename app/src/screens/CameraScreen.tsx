@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { File } from 'expo-file-system';
 
 import { api } from '../api';
 import { useApp } from '../state/store';
@@ -26,6 +27,20 @@ const MODES: { id: CameraMode; label: string; sub: string }[] = [
 
 interface Props {
   onClose: () => void;
+}
+
+/**
+ * Best-effort delete of a preview blob in the cache directory.
+ * Failures are swallowed — the OS will reclaim the cache eventually,
+ * and we never want a discard path to throw.
+ */
+function deletePreviewFile(uri: string | null) {
+  if (!uri) return;
+  try {
+    new File(uri).delete();
+  } catch {
+    /* best-effort: ignore */
+  }
 }
 
 export function CameraScreen({ onClose }: Props) {
@@ -47,6 +62,11 @@ export function CameraScreen({ onClose }: Props) {
 
   // ── preview state: non-null while waiting for user to confirm/retake ──
   const [previewUri, setPreviewUri] = useState<string | null>(null);
+  // Re-entrancy guard for confirmPhoto: a fast double-tap on "使用" would
+  // otherwise enqueue two finalizeCapture() calls before the first clears
+  // previewUri. Use a ref (not state) so the second tap sees the latest
+  // value synchronously without waiting for a re-render.
+  const confirming = useRef(false);
 
   // Auto-prompt on mount.
   useEffect(() => {
@@ -80,10 +100,14 @@ export function CameraScreen({ onClose }: Props) {
 
   /** User taps "使用" — finalize the photo and add it to the pool. */
   const confirmPhoto = useCallback(async () => {
-    if (!previewUri) return;
+    // Guard against re-entry from a double-tap: previewUri stays truthy
+    // for the entire async finalizeCapture() window, so without this ref
+    // a second tap would enqueue another pushPiece.
+    if (!previewUri || confirming.current) return;
+    confirming.current = true;
     const uri = previewUri;
-    // Do NOT clear previewUri here — wait until finalize succeeds so the user
-    // can retry if the API call fails (Fix 1).
+    // Do NOT clear previewUri before finalize succeeds — preserves user's
+    // ability to retry on error (Fix 1, original).
     try {
       const piece = await api.finalizeCapture({ kind: 'photo', blobUri: uri });
       setPreviewUri(null);           // Success — safe to clear now.
@@ -94,14 +118,17 @@ export function CameraScreen({ onClose }: Props) {
       console.warn('photo finalize failed:', err);
       setState('camera');
       // previewUri stays set — user can tap "使用" again to retry.
+    } finally {
+      confirming.current = false;
     }
   }, [previewUri, onClose, pushPiece, setState]);
 
   /** User taps "重拍" — discard the preview and return to viewfinder. */
   const retakePhoto = useCallback(() => {
+    deletePreviewFile(previewUri);
     setPreviewUri(null);
     setState('camera');
-  }, [setState]);
+  }, [previewUri, setState]);
 
   const startVideo = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -205,11 +232,18 @@ export function CameraScreen({ onClose }: Props) {
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
           testID="preview-image"
-          onError={() => { setPreviewUri(null); setState('camera'); }}
+          onError={() => {
+            deletePreviewFile(previewUri);
+            setPreviewUri(null);
+            setState('camera');
+          }}
         />
         {/* Allow closing even in preview mode — photo is silently discarded */}
         <View style={[styles.topBar, { top: insets.top + 8 }]}>
-          <Pressable onPress={onClose} hitSlop={12} testID="btn-close-preview">
+          <Pressable
+            onPress={() => { deletePreviewFile(previewUri); onClose(); }}
+            hitSlop={12}
+            testID="btn-close-preview">
             <Text style={styles.topBtn}>✕</Text>
           </Pressable>
           <View style={{ width: 24 }} />

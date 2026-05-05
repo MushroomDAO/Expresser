@@ -23,13 +23,28 @@ const fakeCameraRef = {
 
 /**
  * Returns a closure that emulates the CameraScreen preview state-machine:
- *   { getPreviewUri, takePhoto, confirmPhoto, retakePhoto }
+ *   { getPreviewUri, takePhoto, confirmPhoto, retakePhoto, closePreview }
  *
  * We use mockFinalizeCapture directly so the test does not spin up an API
  * server and all async paths resolve quickly.
+ *
+ * Mirrors:
+ *   - Fix 1: re-entrancy guard for confirmPhoto via a `confirming` flag
+ *     (the component uses a useRef; here a closure-scoped boolean is the
+ *     equivalent for synchronous double-tap detection).
+ *   - Fix 2: best-effort `deletePreviewFile` on retake / close / image-error.
+ *     We swap in a vi.fn() spy for the delete so tests can assert it ran.
  */
-function makePreviewMachine(onClose: () => void) {
+function makePreviewMachine(
+  onClose: () => void,
+  opts: { finalizeDelayMs?: number; deletePreviewFile?: (uri: string | null) => void } = {},
+) {
   let previewUri: string | null = null;
+  let confirming = false;
+
+  const finalizeDelayMs = opts.finalizeDelayMs ?? 0;
+  // Default no-op so existing tests don't need to pass anything.
+  const deletePreviewFile = opts.deletePreviewFile ?? (() => {});
 
   const getState = () => useApp.getState();
 
@@ -49,10 +64,15 @@ function makePreviewMachine(onClose: () => void) {
   }
 
   async function confirmPhoto({ fail = false } = {}) {
-    if (!previewUri) return;
+    // Mirror Fix 1: re-entrancy guard. previewUri stays truthy across the
+    // async finalize window, so we need a separate flag.
+    if (!previewUri || confirming) return;
+    confirming = true;
     const uri = previewUri;
-    // Mirror Fix 1: do NOT clear previewUri before the async call succeeds.
     try {
+      if (finalizeDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, finalizeDelayMs));
+      }
       if (fail) throw new Error('simulated finalize failure');
       const piece = await mockFinalizeCapture({ kind: 'photo', blobUri: uri });
       previewUri = null;             // Success — safe to clear now.
@@ -64,12 +84,20 @@ function makePreviewMachine(onClose: () => void) {
     } catch {
       getState().setState('camera');
       // previewUri stays set — user can retry.
+    } finally {
+      confirming = false;
     }
   }
 
   function retakePhoto() {
+    deletePreviewFile(previewUri);
     previewUri = null;
     getState().setState('camera');
+  }
+
+  function closePreview() {
+    deletePreviewFile(previewUri);
+    onClose();
   }
 
   return {
@@ -77,6 +105,7 @@ function makePreviewMachine(onClose: () => void) {
     takePhoto,
     confirmPhoto,
     retakePhoto,
+    closePreview,
   };
 }
 
@@ -202,5 +231,74 @@ describe('CameraScreen — photo preview state machine', () => {
     expect(onClose).toHaveBeenCalledOnce();
     // Pool stays empty — photo was discarded
     expect(useApp.getState().pool).toHaveLength(0);
+  });
+
+  // ── Fix 1 — re-entrancy: a fast double-tap on "使用" must NOT push twice ──
+  it('double-tap confirmPhoto only pushes a single piece to the pool', async () => {
+    const onClose = vi.fn();
+    // Add a small finalize delay so both taps fall inside the same async window.
+    const m = makePreviewMachine(onClose, { finalizeDelayMs: 20 });
+
+    await m.takePhoto();
+    // Fire two confirms back-to-back without awaiting the first — the second
+    // must be ignored by the `confirming` re-entrancy guard.
+    const p1 = m.confirmPhoto();
+    const p2 = m.confirmPhoto();
+    await Promise.all([p1, p2]);
+
+    expect(useApp.getState().pool).toHaveLength(1);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('after a successful confirm, a follow-up confirm is a no-op (previewUri cleared)', async () => {
+    const onClose = vi.fn();
+    const m = makePreviewMachine(onClose);
+    await m.takePhoto();
+    await m.confirmPhoto();
+    // previewUri is now null — a second confirm should add nothing.
+    await m.confirmPhoto();
+    expect(useApp.getState().pool).toHaveLength(1);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  // ── Fix 2 — temp-file leak: discard paths must invoke deletePreviewFile ──
+  it('retakePhoto invokes deletePreviewFile with the current previewUri', async () => {
+    const deletePreviewFile = vi.fn();
+    const m = makePreviewMachine(vi.fn(), { deletePreviewFile });
+
+    await m.takePhoto();
+    expect(m.getPreviewUri()).toBe(FAKE_URI);
+
+    m.retakePhoto();
+
+    expect(deletePreviewFile).toHaveBeenCalledTimes(1);
+    expect(deletePreviewFile).toHaveBeenCalledWith(FAKE_URI);
+    expect(m.getPreviewUri()).toBeNull();
+  });
+
+  it('closing the preview (X button) invokes deletePreviewFile before onClose', async () => {
+    const deletePreviewFile = vi.fn();
+    const onClose = vi.fn();
+    const m = makePreviewMachine(onClose, { deletePreviewFile });
+
+    await m.takePhoto();
+    m.closePreview();
+
+    expect(deletePreviewFile).toHaveBeenCalledWith(FAKE_URI);
+    expect(onClose).toHaveBeenCalledOnce();
+    // Order matters: file is deleted before close fires.
+    const deleteOrder = deletePreviewFile.mock.invocationCallOrder[0];
+    const closeOrder = onClose.mock.invocationCallOrder[0];
+    expect(deleteOrder).toBeLessThan(closeOrder);
+  });
+
+  it('successful confirmPhoto does NOT invoke deletePreviewFile (file is consumed)', async () => {
+    const deletePreviewFile = vi.fn();
+    const m = makePreviewMachine(vi.fn(), { deletePreviewFile });
+
+    await m.takePhoto();
+    await m.confirmPhoto();
+
+    expect(deletePreviewFile).not.toHaveBeenCalled();
   });
 });
