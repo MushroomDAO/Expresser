@@ -37,6 +37,17 @@ export function ContextText({ onCancelCountdown }: Props) {
       </View>
     );
   }
+  if (state === 'transcribing') {
+    return (
+      <View style={styles.wrap}>
+        <Text style={[styles.eyebrow, { color: t.fgSub }]}>TRANSCRIBING</Text>
+        <Text style={[styles.h2, { color: t.fg }]}>识别中…</Text>
+        <Text style={[styles.transcript, { color: t.fgSub }]}>
+          {transcript || '正在处理语音…'}
+        </Text>
+      </View>
+    );
+  }
   if (state === 'recording' || state === 'recording_video') {
     return (
       <View style={styles.wrap}>

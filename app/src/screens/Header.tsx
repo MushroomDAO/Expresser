@@ -10,6 +10,7 @@ import type { State } from '../types';
 const LABELS: Record<State, string> = {
   idle: 'Expresser',
   recording: '正在听 · ASR 本地',
+  transcribing: '识别中…',
   transition: '打开镜头…',
   camera: '相机',
   capturing: '正在拍摄',
