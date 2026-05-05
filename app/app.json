@@ -18,7 +18,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Expresser 需要访问相机以拍照和录像,作为日常内容池的一部分。",
         "NSMicrophoneUsageDescription": "Expresser 需要访问麦克风以录入语音片段并本地转写。",
-        "NSPhotoLibraryAddUsageDescription": "保存拍摄的照片或视频到你的相册。"
+        "NSPhotoLibraryAddUsageDescription": "保存拍摄的照片或视频到你的相册。",
+        "NSSpeechRecognitionUsageDescription": "需要语音识别权限，将你的录音转为文字。"
       }
     },
     "android": {

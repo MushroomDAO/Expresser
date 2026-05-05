@@ -3,6 +3,7 @@
 export type State =
   | 'idle'
   | 'recording'
+  | 'transcribing'      // stop pressed — waiting for final ASR result before saving
   | 'transition'
   | 'camera'
   | 'capturing'

@@ -76,6 +76,10 @@ export function HomeScreen() {
     async (save: boolean) => {
       if (recTimer.current) clearInterval(recTimer.current);
       const dur = (Date.now() - recStart.current) / 1000;
+
+      // Show "识别中…" while waiting for the final ASR result.
+      if (save && transcribeHandle.current) setState('transcribing');
+
       const text = transcribeHandle.current
         ? await transcribeHandle.current.finish()
         : '';
