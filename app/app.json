@@ -54,6 +54,11 @@
           "microphonePermission": "Expresser 需要访问麦克风以录入语音片段。"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6db840ea-81d8-470b-8ebb-f1691dc34598"
+      }
+    }
   }
 }
