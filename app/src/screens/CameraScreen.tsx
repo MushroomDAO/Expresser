@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { File } from 'expo-file-system';
 
 import { api } from '../api';
 import { useApp } from '../state/store';
@@ -27,6 +29,20 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * Best-effort delete of a preview blob in the cache directory.
+ * Failures are swallowed — the OS will reclaim the cache eventually,
+ * and we never want a discard path to throw.
+ */
+function deletePreviewFile(uri: string | null) {
+  if (!uri) return;
+  try {
+    new File(uri).delete();
+  } catch {
+    /* best-effort: ignore */
+  }
+}
+
 export function CameraScreen({ onClose }: Props) {
   const dark = useApp((s) => s.dark);
   const camMode = useApp((s) => s.camMode);
@@ -41,33 +57,78 @@ export function CameraScreen({ onClose }: Props) {
   const recordingRef = useRef(false);
   const [facing] = useState<CameraType>('back');
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recStart = useRef<number>(0);
+
+  // ── preview state: non-null while waiting for user to confirm/retake ──
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  // Re-entrancy guard for confirmPhoto: a fast double-tap on "使用" would
+  // otherwise enqueue two finalizeCapture() calls before the first clears
+  // previewUri. Use a ref (not state) so the second tap sees the latest
+  // value synchronously without waiting for a re-render.
+  const confirming = useRef(false);
 
   // Auto-prompt on mount.
   useEffect(() => {
     if (perm && !perm.granted && perm.canAskAgain) requestPerm();
   }, [perm, requestPerm]);
 
+  // Cleanup flash timer on unmount to prevent setState-after-unmount.
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    };
+  }, []);
+
   const takePhoto = useCallback(async () => {
     if (!cameraRef.current) return;
     setState('capturing');
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
-      const piece = await api.finalizeCapture({
-        kind: 'photo',
-        blobUri: photo?.uri,
-      });
-      pushPiece(piece);
-      setState('pool');
-      setTimeout(() => {
-        setState('idle');
-        onClose();
-      }, motion.poolFlashMs);
+      // Enter preview mode — user must confirm before the photo enters the pool.
+      if (photo?.uri) {
+        setState('camera');
+        setPreviewUri(photo.uri);
+      } else {
+        setState('camera');
+      }
     } catch (err) {
       console.warn('photo capture failed:', err);
       setState('camera');
     }
-  }, [onClose, pushPiece, setState]);
+  }, [setState]);
+
+  /** User taps "使用" — finalize the photo and add it to the pool. */
+  const confirmPhoto = useCallback(async () => {
+    // Guard against re-entry from a double-tap: previewUri stays truthy
+    // for the entire async finalizeCapture() window, so without this ref
+    // a second tap would enqueue another pushPiece.
+    if (!previewUri || confirming.current) return;
+    confirming.current = true;
+    const uri = previewUri;
+    // Do NOT clear previewUri before finalize succeeds — preserves user's
+    // ability to retry on error (Fix 1, original).
+    try {
+      const piece = await api.finalizeCapture({ kind: 'photo', blobUri: uri });
+      setPreviewUri(null);           // Success — safe to clear now.
+      pushPiece(piece);
+      setState('pool');
+      flashTimer.current = setTimeout(() => { setState('idle'); onClose(); }, motion.poolFlashMs);
+    } catch (err) {
+      console.warn('photo finalize failed:', err);
+      setState('camera');
+      // previewUri stays set — user can tap "使用" again to retry.
+    } finally {
+      confirming.current = false;
+    }
+  }, [previewUri, onClose, pushPiece, setState]);
+
+  /** User taps "重拍" — discard the preview and return to viewfinder. */
+  const retakePhoto = useCallback(() => {
+    deletePreviewFile(previewUri);
+    setPreviewUri(null);
+    setState('camera');
+  }, [previewUri, setState]);
 
   const startVideo = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -85,7 +146,7 @@ export function CameraScreen({ onClose }: Props) {
       });
       pushPiece(piece);
       setState('pool');
-      setTimeout(() => {
+      flashTimer.current = setTimeout(() => {
         setState('idle');
         onClose();
       }, motion.poolFlashMs);
@@ -162,6 +223,50 @@ export function CameraScreen({ onClose }: Props) {
     );
   }
 
+  // ── photo preview confirm screen ──
+  if (previewUri) {
+    return (
+      <View style={styles.root}>
+        <Image
+          source={{ uri: previewUri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          testID="preview-image"
+          onError={() => {
+            deletePreviewFile(previewUri);
+            setPreviewUri(null);
+            setState('camera');
+          }}
+        />
+        {/* Allow closing even in preview mode — photo is silently discarded */}
+        <View style={[styles.topBar, { top: insets.top + 8 }]}>
+          <Pressable
+            onPress={() => { deletePreviewFile(previewUri); onClose(); }}
+            hitSlop={12}
+            testID="btn-close-preview">
+            <Text style={styles.topBtn}>✕</Text>
+          </Pressable>
+          <View style={{ width: 24 }} />
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={[styles.previewActions, { bottom: insets.bottom + 32 }]}>
+          <Pressable
+            onPress={retakePhoto}
+            style={({ pressed }) => [styles.previewBtn, styles.previewBtnRetake, pressed && { opacity: 0.7 }]}
+            testID="btn-retake">
+            <Text style={styles.previewBtnText}>重拍</Text>
+          </Pressable>
+          <Pressable
+            onPress={confirmPhoto}
+            style={({ pressed }) => [styles.previewBtn, styles.previewBtnUse, pressed && { opacity: 0.85 }]}
+            testID="btn-use">
+            <Text style={[styles.previewBtnText, { color: '#fff' }]}>使用</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <CameraView
@@ -172,7 +277,7 @@ export function CameraScreen({ onClose }: Props) {
       />
 
       <View style={[styles.topBar, { top: insets.top + 8 }]}>
-        <Pressable onPress={onClose} hitSlop={12}>
+        <Pressable onPress={onClose} hitSlop={12} testID="btn-close-camera">
           <Text style={styles.topBtn}>✕</Text>
         </Pressable>
         <Text style={styles.modeLabel}>{MODES.find((m) => m.id === camMode)?.label}</Text>
@@ -290,5 +395,33 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 100,
     marginTop: 18,
+  },
+  previewActions: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    paddingHorizontal: 32,
+  },
+  previewBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  previewBtnRetake: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  previewBtnUse: {
+    backgroundColor: palette.primary,
+  },
+  previewBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
