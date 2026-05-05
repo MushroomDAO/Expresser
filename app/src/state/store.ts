@@ -1,5 +1,5 @@
-import { create } from 'zustand';
 import { File } from 'expo-file-system';
+import { create } from 'zustand';
 import type {
   CameraMode,
   Piece,
@@ -125,7 +125,6 @@ export const useApp = create<AppStore>((set, get) => ({
     if (piece?.blobUri) {
       try { new File(piece.blobUri).delete(); } catch { /* best-effort */ }
     }
-    // Pure state update — no side-effects inside the reducer.
     useApp.setState((s) => {
       const pool = s.pool.filter((p) => p.id !== pieceId);
       const draftPicks = { ...s.draftPicks };
