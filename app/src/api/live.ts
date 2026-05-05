@@ -4,6 +4,8 @@
 
 import type { DraftPayload, Piece, TargetId } from '../types';
 import { mockFinalizeCapture, mockTranscribe } from './mock';
+import { publishLocal } from './publish/local';
+import { publishNas } from './publish/nas';
 import type { ApiClient, CapturePayload, ProgressEvent, TranscribeHandle } from './types';
 
 /**
@@ -64,20 +66,77 @@ export async function liveUpload(
 }
 
 /**
- * Live publish: fan-out to user-configured targets via the RSS bridge.
- * The RSS bridge is expected to accept POST with the draft + return:
- *   { targets: ["blog", "feed", "nas"] }
+ * Live publish: fan-out to all user-configured targets.
+ *
+ * - local  : always attempted; archives to device documentDirectory
+ * - nas    : attempted when NAS config exists in AsyncStorage; skipped otherwise
+ * - blog / feed / reels : stubs (will integrate RSS bridge once backend is ready)
+ *
+ * Behaviour:
+ *  - If at least one configured target succeeds, returns the list of succeeded
+ *    user-facing TargetIds. Partial failures are logged but not thrown so the
+ *    UI can show "published to N of M" via `publishedTo`.
+ *  - If every attempted target failed (and no skipped-due-to-missing-config
+ *    target counted), throws an aggregated error. HomeScreen catches this and
+ *    drops into the offline state.
+ *  - The local archive is internal-only and never appears in `succeeded`, but
+ *    a failed local archive does count toward the failure list so we don't
+ *    silently lose data.
  */
 export async function livePublish(payload: DraftPayload): Promise<TargetId[]> {
-  if (!RSS_URL) throw new NotConfiguredError('RSS');
-  const res = await fetch(`${RSS_URL.replace(/\/$/, '')}/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new UploadError(`publish failed (${res.status})`, res.status);
-  const json = (await res.json()) as { targets?: TargetId[] };
-  return json.targets ?? [];
+  const succeeded: TargetId[] = [];
+  const errors: string[] = [];
+  // Track local separately — it's not user-facing TargetId but is the critical
+  // archive path; if it succeeds we still consider the publish "non-empty" so
+  // we don't throw just because NAS was skipped.
+  let localOk = false;
+
+  // --- local archive (internal only — not a user-facing TargetId) ---
+  try {
+    await publishLocal(payload);
+    localOk = true;
+    console.log('[publish] local archive succeeded');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[publish] local archive failed:', err);
+    errors.push(`local: ${msg}`);
+  }
+
+  // --- NAS WebDAV ---
+  // publishNas returns null when config is missing (intentional skip — neither
+  // success nor error). Only an actual throw counts as a failure.
+  try {
+    const putUrl = await publishNas(payload);
+    if (putUrl !== null) {
+      succeeded.push('nas');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[publish] NAS WebDAV upload failed:', err);
+    errors.push(`nas: ${msg}`);
+  }
+
+  // TODO: wire RSS bridge for blog/feed
+  void RSS_URL; // referenced to satisfy no-unused-vars once RSS bridge is wired
+
+  // Throw when nothing was archived and nothing was successfully published.
+  // This catches the "local fails + NAS skipped" case where errors.length (1)
+  // wouldn't equal attempts (2) under the old counter logic, silently swallowing
+  // the local failure. We surface aggregated errors so HomeScreen can drop into
+  // the offline state.
+  if (!localOk && succeeded.length === 0) {
+    if (errors.length > 0) {
+      throw new Error(`All publish targets failed: ${errors.join('; ')}`);
+    }
+    // No errors AND no success AND no local archive: every target was skipped
+    // (e.g. NAS config missing and local somehow not run). Still surface it so
+    // the UI doesn't show a misleading "published" state.
+    throw new Error(
+      'No publish targets attempted (check NAS config and local archive).',
+    );
+  }
+
+  return succeeded;
 }
 
 /** Process is local-only (on-device compose). Use mock cadence as a stand-in. */
